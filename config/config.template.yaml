@@ -23,15 +23,15 @@ ollama:
   temperature: 0.3   # low temp for consistent structured output
 
 obsidian:
-  vault_path: "/Users/es/Library/Mobile Documents/iCloud~md~obsidian/Documents/PaperBrain"
+  vault_path: "path/to/vault"
   papers_folder: "Papers"          # subfolder inside vault
   inbox_tag: "inbox"               # tag added to all new notes for you to process
 
 # iCloud drop folder — put PDFs here to trigger processing
 inbox:
-  pdf_watch_folder: "/Users/es/Library/Mobile Documents/iCloud~md~obsidian/Documents/PaperBrain/inbox_pdfs"
+  pdf_watch_folder: "path/to/vault/inbox_pdfs"
 
 # Logging
 logging:
   level: "INFO"
-  log_file: "/Users/es/paperbrain/logs/paperbrain.log"
+  log_file: "path/to/logs/paperbrain.log"

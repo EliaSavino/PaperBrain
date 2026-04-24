@@ -1,4 +1,5 @@
 config/config.yaml
+config/*secret*
 *.pyc
 __pycache__/
 venv/
@@ -7,4 +8,3 @@ logs/
 *.log
 .DS_Store
 .idea
-

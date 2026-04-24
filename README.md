@@ -1,7 +1,7 @@
 # PaperBrain — Setup Guide
 
 ## What this is
-A Slack bot running on your M1 Mac that:
+A Slack bot running on your local that:
 - Watches for DOIs in Slack channels → replies with chemistry summary in thread
 - Responds to your DMs with ML/computational summaries
 - Watches an iCloud folder for dropped PDFs
