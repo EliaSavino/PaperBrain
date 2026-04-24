@@ -1,0 +1,37 @@
+# PaperBrain Configuration
+# Copy this to config.yaml and fill in your values
+# Never commit config.yaml to git
+
+slack:
+  bot_token: "xoxb-your-bot-token"          # Bot User OAuth Token
+  app_token: "xapp-your-app-token"          # App-Level Token (for Socket Mode)
+  signing_secret: "your-signing-secret"
+  # Channels to watch passively for DOIs (add channel IDs, not names)
+  # Get channel ID: right-click channel → View channel details → bottom of about tab
+  watched_channels:
+    - "C0XXXXXXXXX"   # e.g. #papers
+    - "C0YYYYYYYYY"   # e.g. #general
+  # Your personal Slack user ID (so bot knows when it's you)
+  # Get it: click your profile → More → Copy member ID
+  elia_user_id: "U0XXXXXXXXX"
+
+ollama:
+  host: "http://localhost:11434"
+  model: "qwen3:8b"
+  # Context window — qwen3:8b supports 32k, we use 16k to be safe with M1 RAM
+  num_ctx: 16384
+  temperature: 0.3   # low temp for consistent structured output
+
+obsidian:
+  vault_path: "/Users/es/Library/Mobile Documents/iCloud~md~obsidian/Documents/PaperBrain"
+  papers_folder: "Papers"          # subfolder inside vault
+  inbox_tag: "inbox"               # tag added to all new notes for you to process
+
+# iCloud drop folder — put PDFs here to trigger processing
+inbox:
+  pdf_watch_folder: "/Users/es/Library/Mobile Documents/iCloud~md~obsidian/Documents/PaperBrain/inbox_pdfs"
+
+# Logging
+logging:
+  level: "INFO"
+  log_file: "/Users/es/paperbrain/logs/paperbrain.log"

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  PaperBrain launchd service for M1 Mac
+  
+  Install:
+    cp com.paperbrain.bot.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.paperbrain.bot.plist
+  
+  Check status:
+    launchctl list | grep paperbrain
+  
+  View logs:
+    tail -f ~/paperbrain/logs/paperbrain.log
+  
+  Stop:
+    launchctl unload ~/Library/LaunchAgents/com.paperbrain.bot.plist
+  
+  Restart:
+    launchctl unload ~/Library/LaunchAgents/com.paperbrain.bot.plist
+    launchctl load ~/Library/LaunchAgents/com.paperbrain.bot.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.paperbrain.bot</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- UPDATE THIS PATH to your actual Python venv -->
+    <string>/Users/es/paperbrain/venv/bin/python</string>
+    <string>/Users/es/paperbrain/src/slack_bot.py</string>
+  </array>
+
+  <!-- Run at login and keep alive if it crashes -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Wait 10s before restarting on crash -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <!-- Working directory -->
+  <key>WorkingDirectory</key>
+  <string>/Users/es/paperbrain</string>
+
+  <!-- Environment variables -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    <!-- Ollama needs this to find its socket on Mac -->
+    <key>OLLAMA_HOST</key>
+    <string>http://0.0.0.0:11434</string>
+  </dict>
+
+  <!-- Log stdout and stderr separately -->
+  <key>StandardOutPath</key>
+  <string>/Users/es/paperbrain/logs/paperbrain.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/es/paperbrain/logs/paperbrain.stderr.log</string>
+</dict>
+</plist>
