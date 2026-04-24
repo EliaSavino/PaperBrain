@@ -7,6 +7,8 @@ Behaviors:
 - Channel message containing DOI: reply in thread with chem summary + Obsidian note
 - "@paperbrain summarize for elia" in channel: reply with ML summary instead
 - PDF attached in DM: process and summarize
+- @PaperBot mention with PDF in any channel: download and summarize the PDF, reply in thread
+- @PaperBot mention with DOI (no PDF): fetch and summarize, reply in thread
 """
 
 import logging
@@ -67,6 +69,57 @@ def is_watched_channel(channel_id: str, config: dict) -> bool:
 def create_app(config: dict) -> App:
     app = App(token=config["slack"]["bot_token"])
 
+    # Fetch the bot's own user ID so we can skip @mention messages in the
+    # message handler (they're handled by the app_mention handler instead).
+    bot_user_id = None
+    try:
+        auth_result = app.client.auth_test()
+        bot_user_id = auth_result.get("user_id")
+        logger.info(f"Bot user ID: {bot_user_id}")
+    except Exception as e:
+        logger.warning(f"Could not fetch bot user ID: {e}")
+
+    # ─────────────────────────────────────────────────────
+    # app_mention handler — @PaperBot with PDF or DOI in any channel
+    # ─────────────────────────────────────────────────────
+    @app.event("app_mention")
+    def handle_mention(event, say, client, logger):
+        channel_id = event.get("channel")
+        text = event.get("text", "") or ""
+        files = event.get("files", [])
+        thread_ts = event.get("thread_ts") or event.get("ts")
+
+        def reply(msg, **kw):
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=msg,
+                **kw
+            )
+
+        mode = "ml" if is_ml_request(text) else "chem"
+
+        # PDF attachment → download from Slack and process
+        pdf_files = [f for f in files if f.get("mimetype") == "application/pdf"]
+        if pdf_files:
+            reply("📄 Got your PDF, processing... this takes a minute ⏳")
+            for pdf_file in pdf_files:
+                _handle_pdf_file(pdf_file, client, reply, config, mode=mode)
+            return
+
+        # DOI in text → fetch and summarize
+        doi = extract_doi_from_message(text)
+        if doi:
+            reply(f"🔍 Found DOI `{doi}`, fetching and summarizing... ⏳")
+            _handle_doi(doi, reply, config, mode=mode)
+            return
+
+        # No actionable content
+        reply(
+            "Hi! Mention me with a PDF attachment or a DOI and I'll summarize it.\n"
+            "Example: `@PaperBrain 10.1021/jacs.3c01234` or attach a PDF file."
+        )
+
     # ─────────────────────────────────────────────────────
     # DM handler — process DOI or PDF from Elia directly
     # ─────────────────────────────────────────────────────
@@ -109,6 +162,11 @@ def create_app(config: dict) -> App:
 
         # ── Watched channel handling ──────────────────────
         if is_watched_channel(channel_id, config):
+            # @mention messages are handled by the app_mention handler above;
+            # skip them here to avoid processing the same message twice.
+            if bot_user_id and f"<@{bot_user_id}>" in text:
+                return
+
             doi = extract_doi_from_message(text)
             if not doi:
                 return   # no DOI, ignore
@@ -119,7 +177,7 @@ def create_app(config: dict) -> App:
             # Reply in thread
             thread_ts = event.get("thread_ts") or event.get("ts")
             _handle_doi(
-                doi, 
+                doi,
                 lambda msg, **kw: client.chat_postMessage(
                     channel=channel_id,
                     thread_ts=thread_ts,
