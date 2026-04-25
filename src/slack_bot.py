@@ -25,6 +25,23 @@ from summarizer import format_slack_chem_summary, format_slack_ml_summary
 
 logger = logging.getLogger(__name__)
 
+_HELP_TEXT = (
+    "Hey! Here's what I can do:\n\n"
+    "• *Paste a DOI or paper URL* — I'll fetch, summarize and save it to Obsidian\n"
+    "  e.g. `10.1021/jacs.3c01234` or `https://doi.org/10.1021/jacs.3c01234`\n\n"
+    "• *Attach a PDF* — perfect for paywalled papers I can't grab myself\n\n"
+    "• Add `for elia` or `ml summary` to get the ML/computational angle instead of chemistry\n\n"
+    "Works in DMs and in any channel you @mention me."
+)
+
+_DM_VIBES_TEXT = (
+    "My friend, not vibes 😅\n\n"
+    "Send me one of these:\n"
+    "• A *DOI* or paper URL — e.g. `10.1021/jacs.3c01234`\n"
+    "• A *PDF attachment* — great for paywalled papers\n\n"
+    "That's literally it!"
+)
+
 
 def load_config(config_path: str = None) -> dict:
     if config_path is None:
@@ -66,6 +83,14 @@ def is_watched_channel(channel_id: str, config: dict) -> bool:
     return channel_id in config["slack"]["watched_channels"]
 
 
+def _react(client, channel_id: str, timestamp: str, emoji: str = "thumbsup"):
+    """Add an emoji reaction to a Slack message. Silently ignores failures."""
+    try:
+        client.reactions_add(channel=channel_id, timestamp=timestamp, name=emoji)
+    except Exception as e:
+        logger.debug(f"Could not add reaction: {e}")
+
+
 def create_app(config: dict) -> App:
     app = App(token=config["slack"]["bot_token"])
 
@@ -87,7 +112,8 @@ def create_app(config: dict) -> App:
         channel_id = event.get("channel")
         text = event.get("text", "") or ""
         files = event.get("files", [])
-        thread_ts = event.get("thread_ts") or event.get("ts")
+        msg_ts = event.get("ts")
+        thread_ts = event.get("thread_ts") or msg_ts
 
         def reply(msg, **kw):
             client.chat_postMessage(
@@ -99,26 +125,23 @@ def create_app(config: dict) -> App:
 
         mode = "ml" if is_ml_request(text) else "chem"
 
-        # PDF attachment → download from Slack and process
+        # PDF attachment → react, then download and process
         pdf_files = [f for f in files if f.get("mimetype") == "application/pdf"]
         if pdf_files:
-            reply("📄 Got your PDF, processing... this takes a minute ⏳")
+            _react(client, channel_id, msg_ts)
             for pdf_file in pdf_files:
                 _handle_pdf_file(pdf_file, client, reply, config, mode=mode)
             return
 
-        # DOI in text → fetch and summarize
+        # DOI in text → react, then fetch and summarize
         doi = extract_doi_from_message(text)
         if doi:
-            reply(f"🔍 Found DOI `{doi}`, fetching and summarizing... ⏳")
+            _react(client, channel_id, msg_ts)
             _handle_doi(doi, reply, config, mode=mode)
             return
 
-        # No actionable content
-        reply(
-            "Hi! Mention me with a PDF attachment or a DOI and I'll summarize it.\n"
-            "Example: `@PaperBrain 10.1021/jacs.3c01234` or attach a PDF file."
-        )
+        # No actionable content → helpful rundown
+        reply(_HELP_TEXT)
 
     # ─────────────────────────────────────────────────────
     # DM handler — process DOI or PDF from Elia directly
@@ -138,26 +161,25 @@ def create_app(config: dict) -> App:
 
         # ── DM handling ──────────────────────────────────
         if channel_type == "im":
+            msg_ts = event.get("ts")
+
             # PDF attachment in DM
             if files:
                 for file in files:
                     if file.get("mimetype") == "application/pdf":
-                        say("📄 Got your PDF, processing... this takes a minute ⏳")
+                        _react(client, channel_id, msg_ts)
                         _handle_pdf_file(file, client, say, config, mode="ml")
                         return
 
             # DOI in DM text
             doi = extract_doi_from_message(text)
             if doi:
-                say(f"🔍 Found DOI `{doi}`, fetching and summarizing... ⏳")
+                _react(client, channel_id, msg_ts)
                 _handle_doi(doi, say, config, mode="ml")
                 return
 
-            # Unknown DM
-            say(
-                "Hi! Send me a DOI, a paper URL, or attach a PDF and I'll summarize it for you.\n"
-                "Example: `10.1021/jacs.3c01234`"
-            )
+            # Text with no DOI and no PDF
+            say(_DM_VIBES_TEXT)
             return
 
         # ── Watched channel handling ──────────────────────
@@ -171,11 +193,11 @@ def create_app(config: dict) -> App:
             if not doi:
                 return   # no DOI, ignore
 
-            # Determine summary mode
             mode = "ml" if is_ml_request(text) else "chem"
+            msg_ts = event.get("ts")
+            thread_ts = event.get("thread_ts") or msg_ts
 
-            # Reply in thread
-            thread_ts = event.get("thread_ts") or event.get("ts")
+            _react(client, channel_id, msg_ts)
             _handle_doi(
                 doi,
                 lambda msg, **kw: client.chat_postMessage(
@@ -199,22 +221,36 @@ def _handle_doi(doi: str, say, config: dict, mode: str = "chem"):
             msg = format_slack_ml_summary(summary)
         else:
             msg = format_slack_chem_summary(summary)
+        # Warn clearly when we only had the abstract (paywalled paper)
+        if not paper.full_text:
+            msg = (
+                "🔒 *DOI found but no open-access PDF* — summary is from the abstract only.\n"
+                "_Got the PDF? Mention me and attach it for a fuller summary._\n\n"
+            ) + msg
         say(msg)
     except PipelineError as e:
+        err = str(e)
         logger.error(f"Pipeline error for DOI {doi}: {e}")
-        say(f"❌ Couldn't process DOI `{doi}`: {e}\nIs the DOI correct?")
+        if "Could not fetch paper" in err:
+            say(
+                f"🤔 That DOI didn't come back from CrossRef mate — is `{doi}` correct?\n"
+                "Double-check for typos, or try pasting the full paper URL."
+            )
+        elif "Summarization failed" in err:
+            say(f"❌ Found the paper but summarization crashed — check the logs.")
+        else:
+            say(f"❌ Something went wrong with `{doi}`: {e}")
     except Exception as e:
         logger.exception(f"Unexpected error for DOI {doi}: {e}")
-        say(f"❌ Something went wrong processing `{doi}`. Check the logs.")
+        say(f"❌ Something went badly wrong processing `{doi}` — check the logs.")
 
 
 def _handle_pdf_file(file: dict, client, say, config: dict, mode: str = "ml"):
     """Download and process a PDF file from Slack."""
     try:
-        # Download PDF from Slack
         url = file.get("url_private_download")
         if not url:
-            say("❌ Couldn't get download URL for that PDF.")
+            say("❌ Couldn't get the download URL for that PDF — try re-uploading it.")
             return
 
         headers = {"Authorization": f"Bearer {config['slack']['bot_token']}"}
@@ -222,7 +258,6 @@ def _handle_pdf_file(file: dict, client, say, config: dict, mode: str = "ml"):
         resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
 
-        # Save to temp file and process
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(resp.content)
             tmp_path = Path(tmp.name)
@@ -242,7 +277,7 @@ def _handle_pdf_file(file: dict, client, say, config: dict, mode: str = "ml"):
         say(f"❌ Couldn't process that PDF: {e}")
     except Exception as e:
         logger.exception(f"Unexpected error processing PDF: {e}")
-        say("❌ Something went wrong with that PDF. Check the logs.")
+        say("❌ Something went wrong reading that PDF — is it a valid, non-encrypted PDF?")
 
 
 # ─────────────────────────────────────────────────────────
