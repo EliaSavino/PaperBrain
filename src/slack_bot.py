@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 _HELP_TEXT = (
     "Hey! Here's what I can do:\n\n"
-    "• *Paste a DOI or paper URL* — I'll fetch, summarize and save it to Obsidian\n"
+    "• *Paste a DOI or paper URL* — I'll fetch, summarize it!\n"
     "  e.g. `10.1021/jacs.3c01234` or `https://doi.org/10.1021/jacs.3c01234`\n\n"
     "• *Attach a PDF* — perfect for paywalled papers I can't grab myself\n\n"
     "• Add `for elia` or `ml summary` to get the ML/computational angle instead of chemistry\n\n"
@@ -88,7 +88,7 @@ def _react(client, channel_id: str, timestamp: str, emoji: str = "thumbsup"):
     try:
         client.reactions_add(channel=channel_id, timestamp=timestamp, name=emoji)
     except Exception as e:
-        logger.debug(f"Could not add reaction: {e}")
+        logger.warning(f"Could not add reaction: {e}")
 
 
 def create_app(config: dict) -> App:
@@ -109,6 +109,7 @@ def create_app(config: dict) -> App:
     # ─────────────────────────────────────────────────────
     @app.event("app_mention")
     def handle_mention(event, say, client, logger):
+        logger.info(f"App mention: {event}")
         channel_id = event.get("channel")
         text = event.get("text", "") or ""
         files = event.get("files", [])
@@ -148,6 +149,7 @@ def create_app(config: dict) -> App:
     # ─────────────────────────────────────────────────────
     @app.event("message")
     def handle_message(event, say, client, logger):
+        logger.info(f"Message: {event}")
         channel_type = event.get("channel_type")
         channel_id = event.get("channel")
         user_id = event.get("user")
