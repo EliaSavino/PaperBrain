@@ -12,6 +12,7 @@ Behaviors:
 """
 
 import logging
+import random
 import re
 import os
 import sys
@@ -83,8 +84,15 @@ def is_watched_channel(channel_id: str, config: dict) -> bool:
     return channel_id in config["slack"]["watched_channels"]
 
 
-def _react(client, channel_id: str, timestamp: str, emoji: str = "thumbsup"):
+_REACT_EMOJIS = [
+    "eyes", "brain", "nerd_face", "microscope", "dna",
+    "test_tube", "mag", "rocket", "fire", "exploding_head",
+]
+
+def _react(client, channel_id: str, timestamp: str, emoji: str = None):
     """Add an emoji reaction to a Slack message. Silently ignores failures."""
+    if emoji is None:
+        emoji = random.choice(_REACT_EMOJIS)
     try:
         client.reactions_add(channel=channel_id, timestamp=timestamp, name=emoji)
     except Exception as e:
