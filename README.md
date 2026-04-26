@@ -29,6 +29,8 @@ A Slack bot running on your local that:
 5. Under **Event Subscriptions** → Enable Events → Subscribe to bot events:
    - `message.channels`
    - `message.im`
+   - `app_mention`
+
 6. Under **Install App** → Install to Workspace → copy `Bot User OAuth Token` (`xoxb-...`)
 7. Under **Basic Information** → App Credentials → copy **Signing Secret**
 
