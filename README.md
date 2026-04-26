@@ -44,7 +44,7 @@ Click your profile picture → **Profile** → three dots menu → **Copy member
 
 ---
 
-## Step 2 — Install on M1 Mac
+## Step 2 — Install on Machine
 
 ```bash
 # Clone or copy project to M1
@@ -60,15 +60,23 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Create config from template
-cp config/config.template.yaml config/config.yaml
+cp config/config.template.yaml config/config.secret.work.yaml
 ```
+
+careful, the machine that runs the bot needs to be able to access:
+ - The Obsidian vault
+ - The Ollama server
+
+On my setup I have Obsidian synced to iCloud Drive, and Ollama and this bot running on a home server. Fix this so it works for you!
+
+Also remember to never post your secret config to GitHub!
 
 ---
 
 ## Step 3 — Fill in config.yaml
 
 ```bash
-nano ~/paperbrain/config/config.yaml
+nano ~/paperbrain/config/config.secret.work.yaml
 ```
 
 Fill in:
