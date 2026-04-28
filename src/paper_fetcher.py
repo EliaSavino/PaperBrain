@@ -12,6 +12,12 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
+try:
+    import cloudscraper
+    _scraper = cloudscraper.create_scraper()
+except ImportError:
+    _scraper = None
+
 logger = logging.getLogger(__name__)
 
 # Contact email for Unpaywall API (required by their ToS, identifies your requests)
@@ -87,11 +93,24 @@ def fetch_open_access_url(doi: str) -> Optional[str]:
     return None
 
 
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/pdf,*/*;q=0.9",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
 def download_and_extract_pdf(url: str) -> Optional[str]:
     """Download PDF from URL and extract text using PyMuPDF."""
     try:
-        headers = {"User-Agent": f"PaperBrain/1.0 (mailto:{UNPAYWALL_EMAIL})"}
-        resp = requests.get(url, headers=headers, timeout=30, stream=True)
+        resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=30, stream=True)
+        if resp.status_code == 403 and _scraper:
+            logger.info(f"Got 403, retrying with cloudscraper: {url}")
+            resp = _scraper.get(url, timeout=30)
         resp.raise_for_status()
 
         # Check it's actually a PDF
