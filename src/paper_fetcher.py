@@ -9,6 +9,7 @@ import re
 import logging
 import requests
 import fitz  # pymupdf
+from urllib.parse import quote
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
@@ -32,6 +33,7 @@ _DOI_SCAN_CHARS = 6000
 
 # Contact email for Unpaywall API (required by their ToS, identifies your requests)
 UNPAYWALL_EMAIL = "e.schiettekatte@uva.nl"
+CROSSREF_TIMEOUT_SECONDS = 30
 
 # Regex to catch DOIs in various formats people paste in Slack
 DOI_PATTERNS = [
@@ -63,10 +65,13 @@ class PaperMetadata:
 
 def extract_doi_from_text(text: str) -> Optional[str]:
     """Extract first DOI found in a block of text."""
+    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    text = re.sub(r"<([^>|]+)\|[^>]+>", r"\1", text)
     for pattern in DOI_PATTERNS:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            doi = match.group(1).rstrip('.,;)')  # strip trailing punctuation
+            doi = match.group(1).split("|", 1)[0]
+            doi = doi.strip("<>").rstrip('.,;)]}')
             logger.info(f"Extracted DOI: {doi}")
             return doi
     return None
@@ -74,10 +79,10 @@ def extract_doi_from_text(text: str) -> Optional[str]:
 
 def fetch_metadata_crossref(doi: str) -> Optional[dict]:
     """Fetch paper metadata from CrossRef API."""
-    url = f"https://api.crossref.org/works/{doi}"
+    url = f"https://api.crossref.org/works/{quote(doi, safe='')}"
     headers = {"User-Agent": f"PaperBrain/1.0 (mailto:{UNPAYWALL_EMAIL})"}
     try:
-        resp = requests.get(url, headers=headers, timeout=15)
+        resp = requests.get(url, headers=headers, timeout=CROSSREF_TIMEOUT_SECONDS)
         resp.raise_for_status()
         data = resp.json()["message"]
         return data
@@ -300,7 +305,7 @@ def _search_crossref_by_title(title: str) -> Optional[PaperMetadata]:
             params={"query.bibliographic": title, "rows": 1,
                     "select": "DOI,title,author,container-title,published,abstract"},
             headers=headers,
-            timeout=15,
+            timeout=CROSSREF_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
         items = resp.json().get("message", {}).get("items", [])
