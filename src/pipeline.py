@@ -50,7 +50,7 @@ def process_pdf(pdf_path: Path, config: dict) -> Tuple[PaperMetadata, PaperSumma
     """
     logger.info(f"Pipeline starting for PDF: {pdf_path}")
 
-    paper = fetch_paper_from_pdf(pdf_path)
+    paper = fetch_paper_from_pdf(pdf_path, config=config)
     if not paper:
         raise PipelineError(f"Could not process PDF: {pdf_path}")
 

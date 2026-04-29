@@ -4,6 +4,7 @@ Resolves DOIs and fetches paper content via Unpaywall, CrossRef, and direct PDF 
 Falls back gracefully through multiple sources.
 """
 
+import json
 import re
 import logging
 import requests
@@ -13,12 +14,21 @@ from dataclasses import dataclass
 from typing import Optional
 
 try:
+    import ollama as _ollama
+except ImportError:
+    _ollama = None
+
+try:
     import cloudscraper
     _scraper = cloudscraper.create_scraper()
 except ImportError:
     _scraper = None
 
 logger = logging.getLogger(__name__)
+
+# Chars to scan from the start of extracted text when hunting for a DOI.
+# First page of most PDFs is ~3-5k chars; we go a bit wider to catch footer DOIs.
+_DOI_SCAN_CHARS = 6000
 
 # Contact email for Unpaywall API (required by their ToS, identifies your requests)
 UNPAYWALL_EMAIL = "e.schiettekatte@uva.nl"
@@ -224,30 +234,173 @@ def fetch_paper(doi: str) -> Optional[PaperMetadata]:
     return paper
 
 
-def fetch_paper_from_pdf(pdf_path: Path, doi_hint: Optional[str] = None) -> Optional[PaperMetadata]:
+_METADATA_SYSTEM_PROMPT = (
+    "You are a bibliographic metadata extractor. "
+    "Given raw text from the first page of an academic PDF, extract the paper metadata. "
+    "Return ONLY valid JSON, no markdown fences, no commentary."
+)
+
+_METADATA_USER_PROMPT = """Extract bibliographic metadata from this academic paper text.
+
+Text (first page):
+{text}
+
+Return this exact JSON structure:
+{{
+  "title": "Full paper title",
+  "authors": ["First Last", "First Last"],
+  "journal": "Journal or conference name, or empty string if not found",
+  "year": 2024,
+  "doi": "10.xxxx/xxxxx or null if not found"
+}}
+
+Rules:
+- title: the main paper title, not section headings
+- authors: full names in order; omit affiliations
+- year: integer, or null if not found
+- doi: only include if you see an actual DOI string in the text; do not guess"""
+
+
+def _extract_metadata_with_llm(first_page_text: str, config: dict) -> Optional[dict]:
+    """Use local Ollama to extract metadata from raw first-page PDF text."""
+    if not _ollama:
+        return None
+    try:
+        response = _ollama.chat(
+            model=config["ollama"]["model"],
+            messages=[
+                {"role": "system", "content": _METADATA_SYSTEM_PROMPT},
+                {"role": "user", "content": _METADATA_USER_PROMPT.format(text=first_page_text[:3000])},
+            ],
+            options={
+                "num_ctx": config["ollama"]["num_ctx"],
+                "temperature": 0,
+            },
+        )
+        raw = response["message"]["content"]
+        # Strip thinking blocks (qwen3) and markdown fences
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        raw = re.sub(r"```[a-z]*\s*", "", raw)
+        raw = raw.strip()
+        return json.loads(raw)
+    except Exception as e:
+        logger.warning(f"LLM metadata extraction failed: {e}")
+        return None
+
+
+def _search_crossref_by_title(title: str) -> Optional[PaperMetadata]:
     """
-    Process a local PDF file. Extracts text, tries to find DOI in text
-    for metadata lookup, falls back to filename-based metadata.
+    Search CrossRef for a paper by title. Returns metadata only when the
+    top result title matches closely enough to be trustworthy.
+    """
+    headers = {"User-Agent": f"PaperBrain/1.0 (mailto:{UNPAYWALL_EMAIL})"}
+    try:
+        resp = requests.get(
+            "https://api.crossref.org/works",
+            params={"query.bibliographic": title, "rows": 1,
+                    "select": "DOI,title,author,container-title,published,abstract"},
+            headers=headers,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("message", {}).get("items", [])
+        if not items:
+            return None
+
+        item = items[0]
+        found_title = (item.get("title") or [""])[0]
+
+        # Sanity check: word overlap between query title and result title must be > 50%
+        def _words(s):
+            return set(re.sub(r"[^\w\s]", "", s.lower()).split())
+
+        query_words = _words(title)
+        result_words = _words(found_title)
+        if not query_words:
+            return None
+        overlap = len(query_words & result_words) / len(query_words)
+        if overlap < 0.5:
+            logger.warning(
+                f"CrossRef title search low confidence ({overlap:.0%}): "
+                f"'{title}' vs '{found_title}'"
+            )
+            return None
+
+        doi = item.get("DOI", "")
+        logger.info(f"CrossRef title search matched: {found_title} ({doi})")
+        return parse_crossref_metadata(doi, item)
+    except Exception as e:
+        logger.warning(f"CrossRef title search failed: {e}")
+        return None
+
+
+def fetch_paper_from_pdf(pdf_path: Path, doi_hint: Optional[str] = None,
+                         config: Optional[dict] = None) -> Optional[PaperMetadata]:
+    """
+    Process a local PDF file. Extracts text then resolves metadata via:
+      1. DOI regex on first ~6k chars of text
+      2. LLM metadata extraction from first page (if config provided)
+      3. CrossRef title search using LLM-extracted title
+      4. LLM-extracted metadata as floor (still better than filename)
     """
     logger.info(f"Processing local PDF: {pdf_path}")
     full_text = extract_text_from_pdf_path(pdf_path)
     if not full_text:
         return None
 
-    # Try to find DOI in the extracted text (usually on first page)
-    doi = doi_hint or extract_doi_from_text(full_text[:3000])
-
+    # --- Step 1: DOI via regex ---
+    doi = doi_hint or extract_doi_from_text(full_text[:_DOI_SCAN_CHARS])
     if doi:
-        logger.info(f"Found DOI in PDF: {doi}")
+        logger.info(f"Found DOI in PDF text: {doi}")
         paper = fetch_paper(doi)
         if paper:
-            # Use our extracted text (may be better than what Unpaywall gives)
             if not paper.full_text:
                 paper.full_text = full_text
             return paper
 
-    # No DOI found — return minimal metadata from filename
-    logger.warning(f"No DOI found in PDF {pdf_path.name}, using filename as title")
+    # --- Step 2 & 3: LLM extraction + CrossRef title search ---
+    if config:
+        logger.info("No DOI found via regex, trying LLM metadata extraction...")
+        llm_meta = _extract_metadata_with_llm(full_text, config)
+
+        if llm_meta:
+            # If LLM found a DOI, validate it against CrossRef before trusting it
+            llm_doi = llm_meta.get("doi")
+            if llm_doi:
+                logger.info(f"LLM suggested DOI: {llm_doi}, validating with CrossRef...")
+                paper = fetch_paper(llm_doi)
+                if paper:
+                    if not paper.full_text:
+                        paper.full_text = full_text
+                    return paper
+                logger.warning(f"LLM DOI '{llm_doi}' not found in CrossRef, ignoring")
+
+            # Try CrossRef title search
+            llm_title = llm_meta.get("title", "").strip()
+            if llm_title:
+                logger.info(f"Searching CrossRef by title: {llm_title}")
+                paper = _search_crossref_by_title(llm_title)
+                if paper:
+                    if not paper.full_text:
+                        paper.full_text = full_text
+                    return paper
+
+            # Floor: use whatever the LLM extracted — still better than the filename
+            logger.info("Using LLM-extracted metadata as fallback")
+            authors = llm_meta.get("authors") or []
+            return PaperMetadata(
+                doi=llm_meta.get("doi") or "unknown",
+                title=llm_meta.get("title") or pdf_path.stem.replace("-", " ").replace("_", " "),
+                authors=authors if isinstance(authors, list) else [],
+                journal=llm_meta.get("journal") or "",
+                year=llm_meta.get("year"),
+                abstract=None,
+                full_text=full_text,
+                pdf_url=None,
+            )
+
+    # --- Last resort: filename ---
+    logger.warning(f"Metadata extraction failed for {pdf_path.name}, using filename")
     return PaperMetadata(
         doi="unknown",
         title=pdf_path.stem.replace("-", " ").replace("_", " "),
