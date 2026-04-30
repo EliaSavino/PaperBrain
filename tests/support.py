@@ -81,10 +81,17 @@ def import_fresh(module_name):
     for name in [
         module_name,
         "slack_bot",
+        "paperbrain.slack_bot",
         "summarizer",
+        "paperbrain.summarizer",
         "paper_fetcher",
+        "paperbrain.paper_fetcher",
         "pipeline",
+        "paperbrain.pipeline",
         "obsidian_writer",
+        "paperbrain.obsidian_writer",
+        "paperbrain.config",
+        "paperbrain.slack.files",
     ]:
         sys.modules.pop(name, None)
     return importlib.import_module(module_name)

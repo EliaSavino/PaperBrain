@@ -1,0 +1,2 @@
+"""Candidate paper collectors."""
+

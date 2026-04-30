@@ -31,6 +31,22 @@ obsidian:
 inbox:
   pdf_watch_folder: "path/to/vault/inbox_pdfs"
 
+literature_scout:
+  # Entry point: python -m src.literature_scout.scheduler --once
+  interval_hours: 24
+  db_path: "data/literature_scout.sqlite"
+  pdf_download_dir: "data/literature_scout_pdfs"
+  slack_channel: "C0XXXXXXXXX"   # channel where missing-PDF requests are posted
+  unpaywall_email: "your.email@example.com"
+  queries:
+    - '"self-driving lab" OR "Bayesian optimization" OR "active learning" chemistry'
+    - '"flow chemistry" automation reaction optimization'
+  arxiv:
+    max_results: 25
+  rss_feeds: []
+  # Optional: path to an mbox file containing Google Scholar alert emails.
+  scholar_email_mbox: null
+
 # Logging
 logging:
   level: "INFO"
