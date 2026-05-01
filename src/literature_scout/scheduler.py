@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     parser = argparse.ArgumentParser(description="Run the PaperBrain literature scout.")
-    parser.add_argument("--config", default=None, help="Path to config YAML")
+    parser.add_argument("--config", default="config/config.secret.work.yaml", help="Path to config YAML")
     parser.add_argument("--once", action="store_true", help="Run once and exit")
     args = parser.parse_args()
 

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(yaml|yml|json|toml|env\\)$|example|sample\")",
+      "Bash(xargs ls *)",
+      "Bash(python -m pytest tests/literature_scout/ -v)"
+    ]
+  }
+}
